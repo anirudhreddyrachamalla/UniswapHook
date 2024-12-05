@@ -6,10 +6,10 @@ import {Hooks} from "v4-core/src/libraries/Hooks.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 
 import {Constants} from "./base/Constants.sol";
-import {Counter} from "../src/Counter.sol";
+import {LVRHook} from "../src/LVRHook.sol";
 import {HookMiner} from "../test/utils/HookMiner.sol";
 
-/// @notice Mines the address and deploys the Counter.sol Hook contract
+/// @notice Mines the address and deploys the LVRHook.sol Hook contract
 contract CounterScript is Script, Constants {
     function setUp() public {}
 
@@ -23,11 +23,11 @@ contract CounterScript is Script, Constants {
         // Mine a salt that will produce a hook address with the correct flags
         bytes memory constructorArgs = abi.encode(POOLMANAGER);
         (address hookAddress, bytes32 salt) =
-            HookMiner.find(CREATE2_DEPLOYER, flags, type(Counter).creationCode, constructorArgs);
+            HookMiner.find(CREATE2_DEPLOYER, flags, type(LVRHook).creationCode, constructorArgs);
 
         // Deploy the hook using CREATE2
         vm.broadcast();
-        Counter counter = new Counter{salt: salt}(IPoolManager(POOLMANAGER));
+        LVRHook counter = new LVRHook{salt: salt}(IPoolManager(POOLMANAGER));
         require(address(counter) == hookAddress, "CounterScript: hook address mismatch");
     }
 }
