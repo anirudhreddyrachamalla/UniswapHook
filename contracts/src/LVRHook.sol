@@ -8,13 +8,11 @@ import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
 import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "v4-core/src/types/BeforeSwapDelta.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {SafeMath} from "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import {Ownable} from "openzeppelin-contracts/contracts/access/Ownable.sol";
 import {BrevisAppZkOnly} from "./BrevisAppZkOnly.sol";
 
 contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
     using PoolIdLibrary for PoolKey;
-    using SafeMath for uint256;
 
     // Brevis verification
     bytes32 public vkHash;
@@ -51,8 +49,6 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
         vkHash = _vkHash;
     }
 
-    // This function replaces the previous setSigma function
-    // It will be called by the Brevis system after proof verification
     function handleProofResult(bytes32 _vkHash, bytes calldata _circuitOutput) internal override {
         require(vkHash == _vkHash, "LVRHook: invalid vk");
         
@@ -92,7 +88,7 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
 
     function calculateArbitrageFee(PoolId poolId) public view returns (uint256) {
         uint256 poolSigma = sigma[poolId];
-        return BASE_FEE.mul(poolSigma).div(FEE_MULTIPLIER);
+        return (BASE_FEE * poolSigma) / FEE_MULTIPLIER;
     }
 
     function beforeSwap(
@@ -105,7 +101,7 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
         
         if (feesPending[poolId]) {
             uint256 fee = calculateArbitrageFee(poolId);
-            collectedFees[poolId] = collectedFees[poolId].add(fee);
+            collectedFees[poolId] = collectedFees[poolId] + fee;
             feesPending[poolId] = false;
             
             // Here you would implement the actual fee collection logic
@@ -123,16 +119,16 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
     ) external override returns (bytes4) {
         PoolId poolId = key.toId();
         
+        uint256 liquidityAmount = params.liquidityDelta > 0 ? uint256(uint128(params.liquidityDelta)) : 0;
+        
         // Lock liquidity
         liquidityPositions[poolId][sender] = LiquidityPosition({
-            amount: params.liquidityDelta > 0 ? uint256(uint128(params.liquidityDelta)) : 0,
+            amount: liquidityAmount,
             lockTimestamp: block.timestamp,
             isLocked: true
         });
         
-        totalLockedLiquidity[poolId] = totalLockedLiquidity[poolId].add(
-            params.liquidityDelta > 0 ? uint256(uint128(params.liquidityDelta)) : 0
-        );
+        totalLockedLiquidity[poolId] = totalLockedLiquidity[poolId] + liquidityAmount;
         
         return BaseHook.beforeAddLiquidity.selector;
     }
@@ -157,7 +153,7 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
         }
         
         // Update locked liquidity tracking
-        totalLockedLiquidity[poolId] = totalLockedLiquidity[poolId].sub(position.amount);
+        totalLockedLiquidity[poolId] = totalLockedLiquidity[poolId] - position.amount;
         position.isLocked = false;
         position.amount = 0;
         
@@ -182,9 +178,7 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
         LiquidityPosition storage position = liquidityPositions[poolId][liquidityProvider];
         if (!position.isLocked) return;
         
-        uint256 shareOfFees = collectedFees[poolId]
-            .mul(position.amount)
-            .div(totalLockedLiquidity[poolId]);
+        uint256 shareOfFees = (collectedFees[poolId] * position.amount) / totalLockedLiquidity[poolId];
         
         // Reset fees after distribution
         collectedFees[poolId] = 0;
