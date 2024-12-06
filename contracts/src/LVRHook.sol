@@ -106,6 +106,8 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
             
             // Here you would implement the actual fee collection logic
             // This might involve transferring tokens from the sender
+
+            // TODO: take fee amount from auction for poolID[blockNum]
         }
         
         return (BaseHook.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
@@ -119,7 +121,7 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
     ) external override returns (bytes4) {
         PoolId poolId = key.toId();
         
-        uint256 liquidityAmount = params.liquidityDelta > 0 ? uint256(uint128(params.liquidityDelta)) : 0;
+        uint256 liquidityAmount = params.liquidityDelta > 0 ? uint256(uint128(int128(params.liquidityDelta))) : 0;
         
         // Lock liquidity
         liquidityPositions[poolId][sender] = LiquidityPosition({
