@@ -1,9 +1,6 @@
 # Compiler files
 cache/
 out/
-lib/
-lib/*
-./lib/
 .vscode/
 # Ignores development (and goerli) broadcast logs
 !/broadcast
