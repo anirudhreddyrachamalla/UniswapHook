@@ -1,3 +1,4 @@
+import "dotenv/config";
 export declare class AppService {
     private prover;
     private brevis;

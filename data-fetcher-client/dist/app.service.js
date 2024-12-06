@@ -35,14 +35,14 @@ let AppService = class AppService {
                 const currentBlock = await this.provider.getBlockNumber();
                 const events = await this.contract.queryFilter(this.contract.filters.Swap(), this.lastReadBlock, currentBlock);
                 if (events.length > 0) {
-                    console.log("Swap events:");
-                    events.forEach(async (event) => {
-                        const receipt = await this.provider.getTransactionReceipt(event.transactionHash);
+                    for (let i = 0; i < events.length; i++) {
+                        const receipt = await this.provider.getTransactionReceipt(events[i].transactionHash);
                         if (receipt.logs.length > 0) {
                             receipt.logs.forEach((log, idx) => {
                                 if (log.address == '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640' && log.topics[0] == '0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67') {
+                                    console.log(`Txn Hash: ${events[i].transactionHash}`);
                                     proofRequest.addReceipt(new brevis_sdk_typescript_1.ReceiptData({
-                                        tx_hash: event.transactionHash,
+                                        tx_hash: events[i].transactionHash,
                                         fields: [
                                             new brevis_sdk_typescript_1.Field({
                                                 log_pos: idx,
@@ -54,36 +54,36 @@ let AppService = class AppService {
                                 }
                             });
                         }
-                    });
+                    }
+                    console.log(`Sending prove request`);
+                    const proofRes = await this.prover.prove(proofRequest);
+                    if (proofRes.has_err) {
+                        const err = proofRes.err;
+                        switch (err.code) {
+                            case brevis_sdk_typescript_1.ErrCode.ERROR_INVALID_INPUT:
+                                console.error('invalid receipt/storage/transaction input:', err.msg);
+                                break;
+                            case brevis_sdk_typescript_1.ErrCode.ERROR_INVALID_CUSTOM_INPUT:
+                                console.error('invalid custom input:', err.msg);
+                                break;
+                            case brevis_sdk_typescript_1.ErrCode.ERROR_FAILED_TO_PROVE:
+                                console.error('failed to prove:', err.msg);
+                                break;
+                        }
+                        return;
+                    }
+                    console.log('proof', proofRes.proof);
+                    try {
+                        const brevisRes = await this.brevis.submit(proofRequest, proofRes, 1, 11155111, 0, "", "0xCBa0CF440e383E6C6cc4484904449BAe9dB312F9");
+                        console.log('brevis res', brevisRes);
+                        await this.brevis.wait(brevisRes.queryKey, 11155111);
+                    }
+                    catch (err) {
+                        console.error(err);
+                    }
                 }
                 else {
                     console.log("No Swap events found in the last block.");
-                }
-                console.log(`Send prove request`);
-                const proofRes = await this.prover.prove(proofRequest);
-                if (proofRes.has_err) {
-                    const err = proofRes.err;
-                    switch (err.code) {
-                        case brevis_sdk_typescript_1.ErrCode.ERROR_INVALID_INPUT:
-                            console.error('invalid receipt/storage/transaction input:', err.msg);
-                            break;
-                        case brevis_sdk_typescript_1.ErrCode.ERROR_INVALID_CUSTOM_INPUT:
-                            console.error('invalid custom input:', err.msg);
-                            break;
-                        case brevis_sdk_typescript_1.ErrCode.ERROR_FAILED_TO_PROVE:
-                            console.error('failed to prove:', err.msg);
-                            break;
-                    }
-                    return;
-                }
-                console.log('proof', proofRes.proof);
-                try {
-                    const brevisRes = await this.brevis.submit(proofRequest, proofRes, 1, 11155111, 0, "", "0xCBa0CF440e383E6C6cc4484904449BAe9dB312F9");
-                    console.log('brevis res', brevisRes);
-                    await this.brevis.wait(brevisRes.queryKey, 11155111);
-                }
-                catch (err) {
-                    console.error(err);
                 }
                 this.lastReadBlock = currentBlock;
             }
