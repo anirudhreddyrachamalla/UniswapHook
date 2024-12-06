@@ -170,7 +170,7 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
             swapToken.approve(address(router), bid.amountIn);
             
             // Execute the swap
-            bytes memory commands = abi.encodePacked(uint8(0x04)); // V4_SWAP command
+            bytes memory commands = abi.encodePacked(uint8(0x10)); // V4_SWAP command
             router.execute(commands, bid.inputs, block.timestamp);
             
             // Collect USDC fee
