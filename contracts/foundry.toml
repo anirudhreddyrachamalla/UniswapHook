@@ -7,5 +7,12 @@ fs_permissions = [{ access = "read-write", path = ".forge-snapshots/"}]
 solc_version = "0.8.26"
 evm_version = "cancun"
 via-ir = true
+[dependencies]
+forge-std = { git = "https://github.com/foundry-rs/forge-std", tag = "v1.0.0" }
+openzeppelin-contracts = { git = "https://github.com/OpenZeppelin/openzeppelin-contracts", tag = "v4.9.0" }
+v4-core = { git = "https://github.com/Uniswap/v4-core", tag = "v1.0.0" }
+v4-periphery = { git = "https://github.com/Uniswap/v4-periphery", tag = "v1.0.0" }
+universal-router = { git = "https://github.com/Uniswap/universal-router", tag = "v1.0.0" }
+
 
 # See more config options https://github.com/foundry-rs/foundry/tree/master/config
