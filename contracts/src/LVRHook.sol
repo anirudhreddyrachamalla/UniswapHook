@@ -18,6 +18,7 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
     using PoolIdLibrary for PoolKey;
 
     // Brevis verification
+    uint public constant PRECISION = 100_000_000;
     bytes32 public vkHash;
     event SigmaUpdated(PoolId indexed poolId, uint256 sigma, uint64 blockNum);
 
@@ -27,10 +28,12 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
     // Locked liquidity tracking
     struct LiquidityPosition {
         uint256 amount;
-        uint256 timestamp;
+        uint256 lvrFundingRate;
     }
     
     mapping(PoolId => mapping(address => LiquidityPosition)) public liquidityPositions;
+    mapping(PoolId => uint256) public totalLiquidity;
+    mapping(PoolId => uint256) public lvrRewardRate;
     
     // Simplified arbitrage bid structure
     struct ArbitrageBid {
@@ -178,37 +181,70 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
                 USDC.transferFrom(bid.bidder, address(this), bid.bidAmount),
                 "Fee collection failed"
             );
+
+            lvrRewardRate[poolId] = lvrRewardRate[poolId] + ((bid.bidAmount)*(PRECISION))/totalLiquidity[poolId];
         }
         
         return (BaseHook.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
     }
 
-    function beforeAddLiquidity(
-        address sender,
+    function afterRemoveLiquidity(
+        address,
         PoolKey calldata key,
-        IPoolManager.ModifyLiquidityParams calldata params,
-        bytes calldata
-    ) external override returns (bytes4) {
+        IPoolManager.ModifyLiquidityParams calldata,
+        BalanceDelta delta,
+        BalanceDelta,
+        bytes calldata hookData
+    ) external override returns (bytes4, BalanceDelta) {
         PoolId poolId = key.toId();
-        
-        uint256 liquidityAmount = params.liquidityDelta > 0 ? uint256(uint128(int128(params.liquidityDelta))) : 0;
-        
-        // Just record the liquidity amount and timestamp
-        liquidityPositions[poolId][sender] = LiquidityPosition({
-            amount: liquidityAmount,
-            timestamp: block.timestamp
-        });
-        
-        return BaseHook.beforeAddLiquidity.selector;
+        address user = abi.decode(hookData, (address));
+        LiquidityPosition memory liqPos = liquidityPositions[poolId][user];
+        if(liqPos.amount != 0){
+            uint currAmt = liqPos.amount;
+            uint reward = ((lvrRewardRate[poolId] - liqPos.lvrFundingRate)*currAmt)/(PRECISION);
+            require(
+                USDC.transfer(user,reward),
+                "LVR reward failed"
+            );
+
+        }
+        liqPos.amount -= uint256(int256(delta.amount0()));
+        totalLiquidity[poolId] -= uint256(int256(delta.amount0()));
+        liqPos.lvrFundingRate = lvrRewardRate[poolId];
+        liquidityPositions[poolId][user] = liqPos;
+        return(this.afterRemoveLiquidity.selector, delta );
     }
 
-    function beforeRemoveLiquidity(
-        address sender,
+    function afterAddLiquidity(
+        address,
         PoolKey calldata key,
-        IPoolManager.ModifyLiquidityParams calldata params,
-        bytes calldata
-    ) external override returns (bytes4) {
-        return BaseHook.beforeRemoveLiquidity.selector;
+        IPoolManager.ModifyLiquidityParams calldata,
+        BalanceDelta delta,
+        BalanceDelta,
+        bytes calldata hookData
+    ) external override onlyPoolManager returns (bytes4, BalanceDelta) {
+        /**
+         * fetch users current points
+         * distribute rewards on current points
+         * update user's position
+         */
+        PoolId poolId = key.toId();
+        address user = abi.decode(hookData, (address));
+        LiquidityPosition memory liqPos = liquidityPositions[poolId][user];
+        if(liqPos.amount != 0){
+            uint currAmt = liqPos.amount;
+            uint reward = ((lvrRewardRate[poolId] - liqPos.lvrFundingRate)*currAmt)/(PRECISION);
+            require(
+                USDC.transfer(user,reward),
+                "LVR reward failed"
+            );
+
+        }
+        liqPos.amount += uint256(int256(delta.amount0()));
+        liqPos.lvrFundingRate = lvrRewardRate[poolId];
+        liquidityPositions[poolId][user] = liqPos;
+        totalLiquidity[poolId] += uint256(int256(delta.amount0()));
+        return (this.afterAddLiquidity.selector, delta);
     }
 
     function afterSwap(
@@ -284,5 +320,9 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
 
     function setDefaultSwapCalldata(bytes calldata _defaultSwapCalldata) external onlyOwner {
         defaultSwapCalldata = _defaultSwapCalldata;
+    }
+
+    function lvrRate(PoolId poolId) public returns(uint256) {
+        return (lvrRewardRate[poolId]*86400*365*100)/(PRECISION*totalLiquidity[poolId]*10);
     }
 }
