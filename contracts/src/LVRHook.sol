@@ -20,7 +20,7 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
     // Brevis verification
     uint public constant PRECISION = 100_000_000;
     bytes32 public vkHash;
-    event SigmaUpdated(PoolId indexed poolId, uint256 sigma, uint64 blockNum);
+    event SigmaUpdated(PoolId indexed poolId, uint256 sigma);
 
     // Volatility metric
     mapping(PoolId => uint256) public sigma;
@@ -88,19 +88,18 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
     function handleProofResult(bytes32 _vkHash, bytes calldata _circuitOutput) internal override {
         require(vkHash == _vkHash, "LVRHook: invalid vk");
         
-        (PoolId poolId, uint256 sigmaValue, uint64 blockNum) = decodeOutput(_circuitOutput);
+        (PoolId poolId, uint256 sigmaValue) = decodeOutput(_circuitOutput);
         
         // Update sigma value for the pool
         sigma[poolId] = sigmaValue;
         
-        emit SigmaUpdated(poolId, sigmaValue, blockNum);
+        emit SigmaUpdated(poolId, sigmaValue);
     }
 
-    function decodeOutput(bytes calldata o) internal pure returns (PoolId, uint256, uint64) {
-        uint64 blockNum = uint64(bytes8(o[0:8]));
-        PoolId poolId = PoolId.wrap(bytes32(o[8:40]));
-        uint256 sigmaValue = uint256(bytes32(o[40:72]));
-        return (poolId, sigmaValue, blockNum);
+    function decodeOutput(bytes calldata o) internal pure returns (PoolId, uint256) {
+        PoolId poolId = PoolId.wrap(bytes32(o[8:32]));
+        uint256 sigmaValue = uint256(bytes32(o[0:64]));
+        return (poolId, sigmaValue);
     }
 
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
