@@ -11,8 +11,8 @@
     url = https://github.com/Uniswap/v4-periphery
 
 [submodule "contracts/lib/universal-router"]
-    path = contracts/lib/universal-router
-    url = https://github.com/Uniswap/universal-router
+	path = contracts/lib/universal-router
+	url = https://github.com/Uniswap/universal-router
 
 [submodule "contracts/lib/openzeppelin-contracts"]
     path = contracts/lib/openzeppelin-contracts
