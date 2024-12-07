@@ -13,9 +13,12 @@ import {BrevisAppZkOnly} from "./BrevisAppZkOnly.sol";
 import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { UniversalRouter } from "@uniswap/universal-router/contracts/UniversalRouter.sol";
 import { Currency } from "v4-core/src/types/Currency.sol";
+import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
+
 
 contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
     using PoolIdLibrary for PoolKey;
+    using StateLibrary for IPoolManager;
 
     // Brevis verification
     uint public constant PRECISION = 100_000_000;
@@ -54,7 +57,6 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
     
     // Fee collection and distribution
     mapping(PoolId => uint256) public collectedFees;
-    mapping(PoolId => bool) public feesPending;
     
     // Constants
     uint256 public constant BASE_FEE = 1e15; // 0.1% base fee
@@ -68,17 +70,15 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
     UniversalRouter public immutable router;
     
     constructor(
-        IPoolManager _poolManager,
+        address _poolManager,
         address _brevisRequest,
         address _usdc,
         address _lvrBidder,
-        bytes memory _defaultSwapCalldata,
-        address payable _router
-    ) BaseHook(_poolManager) Ownable(msg.sender) BrevisAppZkOnly(_brevisRequest) {
+        address _router
+    ) BaseHook(IPoolManager(_poolManager)) Ownable(msg.sender) BrevisAppZkOnly(_brevisRequest) {
         USDC = IERC20(_usdc);
         lvrBidder = _lvrBidder;
-        defaultSwapCalldata = _defaultSwapCalldata;
-        router = UniversalRouter(_router);
+        router = UniversalRouter(payable(_router));
     }
 
     function setVkHash(bytes32 _vkHash) external onlyOwner {
@@ -107,12 +107,12 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
         return Hooks.Permissions({
             beforeInitialize: false,
             afterInitialize: false,
-            beforeAddLiquidity: true,
-            afterAddLiquidity: false,
-            beforeRemoveLiquidity: true,
-            afterRemoveLiquidity: false,
+            beforeAddLiquidity: false,
+            afterAddLiquidity: true,
+            beforeRemoveLiquidity: false,
+            afterRemoveLiquidity: true,
             beforeSwap: true,
-            afterSwap: true,
+            afterSwap: false,
             beforeDonate: false,
             afterDonate: false,
             beforeSwapReturnDelta: false,
@@ -142,7 +142,7 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
             
             // If no external bid exists, create LVR bidder bid
             if (bid.bidder == address(0)) {
-                uint256 minBid = calculateMinimumBid(poolId, 1e18);
+                uint256 minBid = calculateMinimumBid(poolId, poolManager.getLiquidity(poolId));
                 currentBids[poolId][previousBlock] = ArbitrageBid({
                     bidder: lvrBidder,
                     bidAmount: minBid,
@@ -247,17 +247,6 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
         return (this.afterAddLiquidity.selector, delta);
     }
 
-    function afterSwap(
-        address,
-        PoolKey calldata key,
-        IPoolManager.SwapParams calldata,
-        BalanceDelta,
-        bytes calldata
-    ) external override returns (bytes4, int128) {
-        PoolId poolId = key.toId();
-        feesPending[poolId] = true;
-        return (BaseHook.afterSwap.selector, 0);
-    }
 
     // Calculate minimum bid amount based on sigma and pool liquidity
     function calculateMinimumBid(PoolId poolId, uint256 poolLiquidity) public view returns (uint256) {
@@ -280,7 +269,7 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
         ArbitrageBid storage currentBid = currentBids[poolId][currentBlock];
         
         // Calculate minimum bid
-        uint256 minBid = calculateMinimumBid(poolId, 1e18); // TODO: Get actual pool liquidity
+        uint256 minBid = calculateMinimumBid(poolId, poolManager.getLiquidity(poolId));
         require(bidAmount >= minBid, "Bid too low");
         
         // Only accept if bid is higher than current bid
