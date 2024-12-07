@@ -21,13 +21,13 @@ import "forge-std/console.sol";
 
 contract DeployHookAndPool is Script {
     PoolManager manager =
-        PoolManager(0xCa6DBBe730e31fDaACaA096821199EEED5AD84aE);
+        PoolManager(0x8C4BcBE6b9eF47855f97E675296FA3F6fafa5F1A);
     PoolSwapTest swapRouter =
-        PoolSwapTest(0xEc9537B6D66c14E872365AB0EAE50dF7b254D4Fc);
+        PoolSwapTest(0xe49d2815C231826caB58017e214Bed19fE1c2dD4);
     address payable router = payable(0x4D73A4411CA1c660035e4AECC8270E5DdDEC8C17);
     UniversalRouter universalRouter = UniversalRouter(router);
     PoolModifyLiquidityTest modifyLiquidityRouter =
-        PoolModifyLiquidityTest(0x1f03f235e371202e49194F63C7096F5697848822);
+        PoolModifyLiquidityTest(0x496CD7097f0BDd32774dA3D2F1Ef0adF430b7e81);
     address brevisRequest = 0xa082F86d9d1660C29cf3f962A31d7D20E367154F;
     address lvrBidder;
 
@@ -67,7 +67,7 @@ contract DeployHookAndPool is Script {
 
         uint160 flags = uint160( Hooks.AFTER_ADD_LIQUIDITY_FLAG | Hooks.AFTER_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG);
 
-        address CREATE2_DEPLOYER = 0x0cD73A4E3d34D5488BC4E547fECeDAc86305dB9d;
+        address CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
         (address hookAddress, bytes32 salt) = HookMiner.find(
             CREATE2_DEPLOYER,
             flags,
@@ -90,12 +90,13 @@ contract DeployHookAndPool is Script {
         });
 
         // the second argument here is SQRT_PRICE_1_1
-        manager.initialize(key, 4*79228162514264337593543950336);
+        manager.initialize(key, 79228162514264337593543950336);
         vm.stopBroadcast();
     }
 
     function run() public {
         vm.startBroadcast();
+        bytes memory hookData = abi.encode(msg.sender);
         modifyLiquidityRouter.modifyLiquidity(
             key,
             IPoolManager.ModifyLiquidityParams({
@@ -104,7 +105,7 @@ contract DeployHookAndPool is Script {
                 liquidityDelta: 10e18,
                 salt: 0
             }),
-            new bytes(0)
+            hookData
         );
         vm.stopBroadcast();
     }
