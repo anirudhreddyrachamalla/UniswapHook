@@ -70,7 +70,7 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
         address _usdc,
         address _lvrBidder,
         bytes memory _defaultSwapCalldata,
-        address _router
+        address payable _router
     ) BaseHook(_poolManager) Ownable(msg.sender) BrevisAppZkOnly(_brevisRequest) {
         USDC = IERC20(_usdc);
         lvrBidder = _lvrBidder;
