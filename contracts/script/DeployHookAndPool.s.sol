@@ -67,7 +67,7 @@ contract DeployHookAndPool is Script {
 
         uint160 flags = uint160( Hooks.AFTER_ADD_LIQUIDITY_FLAG | Hooks.AFTER_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG);
 
-        address CREATE2_DEPLOYER = 0x0cD73A4E3d34D5488BC4E547fECeDAc86305dB9d;
+        address CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
         (address hookAddress, bytes32 salt) = HookMiner.find(
             CREATE2_DEPLOYER,
             flags,
@@ -90,7 +90,7 @@ contract DeployHookAndPool is Script {
         });
 
         // the second argument here is SQRT_PRICE_1_1
-        manager.initialize(key, 4*79228162514264337593543950336);
+        manager.initialize(key, 79228162514264337593543950336);
         vm.stopBroadcast();
     }
 
