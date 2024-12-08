@@ -5,9 +5,9 @@ import { parseUnits, AbiCoder, BrowserProvider, Contract } from "ethers";
 
 export function TradeForm() {
 
-  const HOOK_CONTRACT_ADDRESS = "0xYourContractAddress";
-  const USDC_CONTRACT_ADDRESS = "0xUSDCContractAddress";
-  const BUY_TOKEN_ADDRESS = "0xSellToken";
+  const HOOK_CONTRACT_ADDRESS = "0xf32988a6b16e401d90b04ec6b61a7422ff530580";
+  const USDC_CONTRACT_ADDRESS = "0x497e9e733a57a09063c432bcb19cace7a047fa2e";
+  const UNI_CONTRACT_ADDRESS = "0x909d68d8a57ab8f62b6391e117a77b215ab21dfc";
   const POOL_FEE = 3000;
 
   const { address, isConnected } = useAccount();
@@ -25,7 +25,7 @@ export function TradeForm() {
     wBTC: 100000,
     USDC: 1,
     USDT: 1,
-    UNI: 15,
+    UNI: 1,
   };
 
   // Calculate buy amount based on sell amount and prices
@@ -76,55 +76,92 @@ export function TradeForm() {
   const handleSwap = async () => {
     if (isArbitrage) {
       const key = {
-        currency0: USDC_CONTRACT_ADDRESS, // Address of the sell token
-        currency1: BUY_TOKEN_ADDRESS, // Address of the buy token
-        fee: POOL_FEE, // Pool fee
+        currency0: USDC_CONTRACT_ADDRESS,  // USDC < UNI (alphabetically by address)
+        currency1: UNI_CONTRACT_ADDRESS,
+        fee: POOL_FEE,
+        tickSpacing: 120,
+        hooks: HOOK_CONTRACT_ADDRESS
       };
-      const bidAmount = parseUnits(String(bid), 6); // Assuming USDC with 6 decimals
-      const amountIn = parseUnits(String(sellAmount), 6); // Sell token same as bid token
-      const minAmountOut = parseUnits(String(buyAmount), 18); // Minimum buy token amount
-      const totalAmount = bidAmount.add(amountIn);
-  
-      // Encode actions and parameters
+
+      const bidAmount = parseUnits(String(bid), 18); // USDC has 18 decimals
+      const amountIn = parseUnits(String(sellAmount), 18);
+      const minAmountOut = parseUnits(String(buyAmount), 18); // UNI has 18 decimals
+
+      // Encode Universal Router command
+      const commands = new Uint8Array([0x10]); // V4_SWAP command
+      console.log("address", address);
+
+      // Encode actions for V4Router
+      const actions = new Uint8Array([
+        0x00, // SWAP_EXACT_IN_SINGLE
+        0x01, // SETTLE_ALL
+        0x02  // TAKE_ALL
+      ]);
+
       const abiCoder = new AbiCoder();
-      const actions = abiCoder.encode(
-        ["uint8[]"],
-        [[0 /* SWAP_EXACT_IN_SINGLE */, 1 /* SETTLE_ALL */, 2 /* TAKE_ALL */]]
+      const hookData = abiCoder.encode(
+        ["address"],
+        [address]
       );
+      // Prepare parameters for each action
       const params = [
         abiCoder.encode(
+          ["tuple(address currency0, address currency1, uint24 fee)", "bool", "uint256", "uint256", "uint160", "bytes"],
           [
-            "tuple(address currency0, address currency1, uint24 fee)",
-            "bool",
-            "uint256",
-            "uint256",
-            "uint160",
-            "bytes",
-          ],
-          [key, true, amountIn, minAmountOut, 0, "0x"]
+            [USDC_CONTRACT_ADDRESS, UNI_CONTRACT_ADDRESS, POOL_FEE],
+            true, // zeroForOne is true because we're swapping currency0 (USDC) for currency1 (UNI)
+            amountIn,
+            minAmountOut,
+            0, // sqrtPriceLimitX96
+            hookData
+          ]
         ),
-        abiCoder.encode(["address", "uint256"], [USDC_CONTRACT_ADDRESS, amountIn]),
-        abiCoder.encode(["address", "uint256"], [BUY_TOKEN_ADDRESS, minAmountOut]),
+        abiCoder.encode(
+          ["address", "uint256"],
+          [USDC_CONTRACT_ADDRESS, amountIn]
+        ),
+        abiCoder.encode(
+          ["address", "uint256"],
+          [UNI_CONTRACT_ADDRESS, minAmountOut]
+        )
       ];
-      const inputs = [abiCoder.encode(["bytes", "bytes[]"], [actions, params])];
-  
+
+      // Combine actions and params into inputs
+      const inputs = [abiCoder.encode(
+        ["bytes", "bytes[]"],
+        [actions, params]
+      )];
+
       try {
         const provider = new BrowserProvider(window.ethereum);
         const signer = await provider.getSigner();
 
+        // First approve USDC spending
+        const totalAmount = bidAmount + amountIn;
         const usdcContract = new Contract(
           USDC_CONTRACT_ADDRESS,
           ["function approve(address spender, uint256 amount) public returns (bool)"],
           signer
         );
+
+        console.log("Approving USDC...");
         const approvalTx = await usdcContract.approve(HOOK_CONTRACT_ADDRESS, totalAmount);
         await approvalTx.wait();
         console.log("USDC approved successfully!");
 
-        const contract = new Contract(HOOK_CONTRACT_ADDRESS, ABI, signer);
-        const tx = await contract.bidLVR(key, bidAmount, inputs, true, amountIn);
+        // Call bidLVR
+        const hookContract = new Contract(HOOK_CONTRACT_ADDRESS, ABI, signer);
+        console.log("Submitting bid...");
+        const tx = await hookContract.bidLVR(
+          key,
+          bidAmount,
+          inputs,
+          true, // zeroForOne is true as we're swapping currency0 (USDC) for currency1 (UNI)
+          amountIn
+        );
+        
         const receipt = await tx.wait();
-        console.log("Transaction confirmed:", receipt);
+        console.log("Bid submitted successfully:", receipt);
       } catch (error) {
         console.error("Error in handleSwap:", error);
       }
