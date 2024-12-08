@@ -111,7 +111,7 @@ export function TradeForm() {
         ],
         [
           [USDC_CONTRACT_ADDRESS, UNI_CONTRACT_ADDRESS, POOL_FEE, 120, HOOK_CONTRACT_ADDRESS],
-          zeroForOne, // set based on token order
+          zeroForOne,
           amountIn,
           minAmountOut,
           0,
@@ -145,20 +145,24 @@ export function TradeForm() {
     const abiCoder = new AbiCoder();
     const deadline = Math.floor(Date.now() / 1000) + 300; // 5 minutes from now
     const amountIn = parseUnits(String(sellAmount), 18);
-    const minAmountOut = parseUnits("0", 18); // For example
+    const minAmountOut = parseUnits("0", 18);
     const hookData = abiCoder.encode(["address"], [address]);
+
+    // Check minimum bid if arbitrage
+    if (isArbitrage && parseFloat(bid) < 1.5) {
+      console.error("Current minimum bid is 1.5");
+      return; 
+    }
 
     if (isArbitrage) {
       const key = buildPoolKey();
-      const bidAmount = parseUnits(String(bid), 18);     // Adjust decimals as needed
+      const bidAmount = parseUnits(String(bid), 18);
       const inputs = buildArbitrageParams(amountIn, minAmountOut, hookData);
-      const totalAmount = bidAmount+ amountIn;
+      const totalAmount = bidAmount + amountIn; // Use BigNumber addition
 
       try {
-        // Approve token spending
         await approveToken(signer, USDC_CONTRACT_ADDRESS, HOOK_CONTRACT_ADDRESS, totalAmount);
 
-        // Call bidLVR
         const hookContract = new Contract(HOOK_CONTRACT_ADDRESS, ABI, signer);
         console.log("Submitting bid...");
         const tx = await hookContract.bidLVR(key, bidAmount, inputs, zeroForOne, amountIn);
@@ -169,10 +173,9 @@ export function TradeForm() {
       }
 
     } else {
-      // Normal Swap Logic (using universal router's execute)
-      // Build commands and inputs for a normal swap if needed
-      const commands = new Uint8Array([0x10]); // Example command for a normal swap
-      const actions = new Uint8Array([0x00, 0x01, 0x02]); // actions for simple swap
+      // Normal Swap Logic
+      const commands = new Uint8Array([0x10]); // Example command
+      const actions = new Uint8Array([0x00, 0x01, 0x02]); 
       const params = [
         abiCoder.encode(
           [
@@ -181,7 +184,7 @@ export function TradeForm() {
           ],
           [
             [USDC_CONTRACT_ADDRESS, UNI_CONTRACT_ADDRESS, POOL_FEE, 120, HOOK_CONTRACT_ADDRESS],
-            zeroForOne, // set based on token order
+            zeroForOne,
             amountIn,
             minAmountOut,
             0,
@@ -196,10 +199,7 @@ export function TradeForm() {
       const universalRouter = new Contract(UNIVERSAL_ROUTER_ADDRESS, UNIVERSAL_ROUTER_ABI, signer);
 
       try {
-        // Approvals if necessary
-        // Approve token spending
         await approveToken(signer, USDC_CONTRACT_ADDRESS, HOOK_CONTRACT_ADDRESS, amountIn);
-        // Execute swap
         const tx = await universalRouter.execute(commands, inputs, deadline, { value: 0 });
         const receipt = await tx.wait();
         console.log("Simple swap executed successfully:", receipt);
@@ -215,7 +215,6 @@ export function TradeForm() {
       <div className="space-y-1">
         <label className="text-gray-400 text-sm font-medium">Sell</label>
         <div className="flex items-center space-x-2">
-          {/* Token Dropdown */}
           <div className="relative w-1/3">
             <select
               value={sellToken}
@@ -230,7 +229,6 @@ export function TradeForm() {
             </select>
             <ArrowDown className="absolute right-3 top-2/4 transform -translate-y-2/4 text-gray-400 pointer-events-none" />
           </div>
-          {/* Amount Input */}
           <input
             type="number"
             placeholder="Amount"
@@ -252,7 +250,6 @@ export function TradeForm() {
       <div className="space-y-1">
         <label className="text-gray-400 text-sm font-medium">Buy</label>
         <div className="flex items-center space-x-2">
-          {/* Token Dropdown */}
           <div className="relative w-1/3">
             <select
               value={buyToken}
@@ -267,7 +264,6 @@ export function TradeForm() {
             </select>
             <ArrowDown className="absolute right-3 top-2/4 transform -translate-y-2/4 text-gray-400 pointer-events-none" />
           </div>
-          {/* Amount Input */}
           <input
             type="number"
             placeholder="Amount"
@@ -300,6 +296,11 @@ export function TradeForm() {
             onChange={(e) => setBid(e.target.value)}
             className="w-full bg-gray-800 text-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
           />
+          {bid && parseFloat(bid) < 1.5 && (
+            <p className="text-red-500 text-sm">
+              Current minimum bid is 1.5
+            </p>
+          )}
         </div>
       )}
 

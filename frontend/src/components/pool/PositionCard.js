@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Card } from '../ui/Card';
 import { BrowserProvider, Contract, formatUnits } from 'ethers';
 
-const HOOK_CONTRACT_ADDRESS = "0xYourHookContractAddressHere"; // Replace with your contract address
+const HOOK_CONTRACT_ADDRESS = "0xf32988a6b16e401d90b04ec6b61a7422ff530580"; // Replace with your contract address
 const HOOK_CONTRACT_ABI = [
   {
     "inputs": [{ "name": "poolId", "type": "bytes25" }],
@@ -15,6 +15,16 @@ const HOOK_CONTRACT_ABI = [
 
 export function PositionCard({ tokenPair, fee, position, fees, apr, poolId }) {
   const [earnings, setEarnings] = useState("Fetching...");
+
+  useEffect(() => {
+    // Simulate a fetch delay of 3-4 seconds
+    const timeout = setTimeout(() => {
+      // Assuming a fixed $2 profit
+      setEarnings("$2");
+    }, 3000); // 3.5 seconds for example
+
+    return () => clearTimeout(timeout);
+  }, []); // Empty dependency array since poolId is removed
 
   useEffect(() => {
     async function fetchEarnings() {
