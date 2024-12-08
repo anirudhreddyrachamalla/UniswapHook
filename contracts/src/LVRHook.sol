@@ -14,6 +14,7 @@ import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { UniversalRouter } from "@uniswap/universal-router/contracts/UniversalRouter.sol";
 import { Currency } from "v4-core/src/types/Currency.sol";
 import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
+import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 
 
 contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
@@ -47,7 +48,7 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
         address bidder;
         uint256 bidAmount;
         PoolKey poolKey;
-        bytes[] inputs;
+        IPoolManager.SwapParams inputs;
         bool zeroForOne;
         uint256 amountIn;
     }
@@ -68,7 +69,7 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
 
     // LVR Bidder address and default swap data
     address public lvrBidder;
-    bytes public defaultSwapCalldata;
+    uint public defaultSwapAmount;
     
     // Add router
     UniversalRouter public immutable router;
@@ -139,26 +140,30 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
         PoolId poolId = key.toId();
         
         // Only execute arbitrage if it's from the previous block
-        emit LVRDebug("1");
         if (!pendingArbitrage[poolId]) {
             uint256 previousBlock = block.number - 1;
             ArbitrageBid storage bid = currentBids[poolId][previousBlock];
-            emit LVRDebug("2");
             
             // If no external bid exists, create LVR bidder bid
             if (bid.bidder == address(0)) {
                 uint256 minBid = calculateMinimumBid(poolId, poolManager.getLiquidity(poolId));
-                emit LVRDebug("3");
                 currentBids[poolId][previousBlock] = ArbitrageBid({
                     bidder: lvrBidder,
                     bidAmount: minBid,
                     poolKey: key,
                     //ani-todo: add defaultswapcalldata
-                    inputs: abi.decode(defaultSwapCalldata, (bytes[])),
+                    inputs: IPoolManager.SwapParams({
+                zeroForOne: true,
+                // We provide a negative value here to signify an "exact input for output" swap
+                amountSpecified: -int256(defaultSwapAmount),
+                // No slippage limits (maximum slippage possible)
+                sqrtPriceLimitX96: true
+                    ? TickMath.MIN_SQRT_PRICE + 1
+                    : TickMath.MAX_SQRT_PRICE - 1
+            }),
                     zeroForOne: true, // Set default direction
                     amountIn: 0 // Set default amount
                 });
-                emit LVRDebug("3");
                 bid = currentBids[poolId][previousBlock];
             }
             
@@ -177,21 +182,21 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
                 swapToken.transferFrom(bid.bidder, address(this), bid.amountIn),
                 "Swap token transfer failed"
             );
-            emit LVRDebug("4");
             
             // Approve router to spend tokens
             swapToken.approve(address(router), bid.amountIn);
             
             // Execute the swap
             bytes memory commands = abi.encodePacked(uint8(0x10)); // V4_SWAP command
-            router.execute(commands, bid.inputs, block.timestamp);
+            swapAndSettleBalances(key, params);
+            //ani-todo: transfer swapped funds to bidder
             
             // Collect USDC fee
             require(
                 USDC.transferFrom(bid.bidder, address(this), bid.bidAmount),
                 "Fee collection failed"
             );
-            emit LVRDebug("5");
+            
 
             lvrRewardRate[poolId] = lvrRewardRate[poolId] + ((bid.bidAmount)*(PRECISION))/totalLiquidity[poolId];
         }
@@ -220,12 +225,20 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
             );
 
         }
-        liqPos.amount -= uint256(int256(delta.amount0()));
-        totalLiquidity[poolId] -= uint256(int256(delta.amount0()));
+        uint maxDeductableDelta = min(liqPos.amount, uint256(int256(delta.amount0())));
+        liqPos.amount -= maxDeductableDelta;
+        totalLiquidity[poolId] -= maxDeductableDelta;
         liqPos.lvrFundingRate = lvrRewardRate[poolId];
         liquidityPositions[poolId][user] = liqPos;
-        emit LVRReward(poolId,user,delta.amount0(),liqPos.amount,liqPos.lvrFundingRate, reward);
+        emit LVRReward(poolId,user,-1*int(maxDeductableDelta),liqPos.amount,liqPos.lvrFundingRate, reward);
         return(this.afterRemoveLiquidity.selector, delta );
+    }
+
+    function min(uint currentAmount, uint deltaAmount) internal returns(uint){
+        if(currentAmount < deltaAmount){
+            return currentAmount;
+        }
+        return deltaAmount;
     }
 
     function afterAddLiquidity(
@@ -271,12 +284,12 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
     function bidLVR(
         PoolKey calldata key,
         uint256 bidAmount,
-        bytes[] calldata inputs,
+        IPoolManager.SwapParams calldata inputs,
         bool zeroForOne,
+        //ani-todo can remove amountIn
         uint256 amountIn
     ) external {
         require(bidAmount > 0, "Bid amount must be greater than 0");
-        require(inputs.length > 0, "Swap inputs required");
         
         PoolId poolId = key.toId();
         uint256 currentBlock = block.number;
@@ -323,11 +336,57 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
         lvrBidder = _lvrBidder;
     }
 
-    function setDefaultSwapCalldata(bytes calldata _defaultSwapCalldata) external onlyOwner {
-        defaultSwapCalldata = _defaultSwapCalldata;
+    function setDefaultSwapAmount(uint _defaultSwapAmount) external onlyOwner {
+        defaultSwapAmount  = _defaultSwapAmount;
     }
 
     function lvrRate(PoolId poolId) public returns(uint256) {
         return (lvrRewardRate[poolId]*86400*365*100)/(PRECISION*totalLiquidity[poolId]*10);
+    }
+
+    function swapAndSettleBalances(
+        PoolKey calldata key,
+        IPoolManager.SwapParams memory params
+    ) internal returns (BalanceDelta) {
+        // Conduct the swap inside the Pool Manager
+        BalanceDelta delta = poolManager.swap(key, params, "");
+
+        // If we just did a zeroForOne swap
+        // We need to send Token 0 to PM, and receive Token 1 from PM
+        if (params.zeroForOne) {
+            // Negative Value => Money leaving user's wallet
+            // Settle with PoolManager
+            if (delta.amount0() < 0) {
+                _settle(key.currency0, uint128(-delta.amount0()));
+            }
+
+            // Positive Value => Money coming into user's wallet
+            // Take from PM
+            if (delta.amount1() > 0) {
+                _take(key.currency1, uint128(delta.amount1()));
+            }
+        } else {
+            if (delta.amount1() < 0) {
+                _settle(key.currency1, uint128(-delta.amount1()));
+            }
+
+            if (delta.amount0() > 0) {
+                _take(key.currency0, uint128(delta.amount0()));
+            }
+        }
+
+        return delta;
+    }
+
+    function _settle(Currency currency, uint128 amount) internal {
+        // Transfer tokens to PM and let it know
+        poolManager.sync(currency);
+        currency.transfer(address(poolManager), amount);
+        poolManager.settle();
+    }
+
+    function _take(Currency currency, uint128 amount) internal {
+        // Take tokens out of PM to our hook contract
+        poolManager.take(currency, address(this), amount);
     }
 }
