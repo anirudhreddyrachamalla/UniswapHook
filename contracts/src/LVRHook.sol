@@ -24,6 +24,10 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
     uint public constant PRECISION = 100_000_000;
     bytes32 public vkHash;
     event SigmaUpdated(PoolId indexed poolId, uint256 sigma);
+    event LVRReward(PoolId poolId, address user, int liquidityDelta, uint updatedLiquidity, uint256 lvrRewardRate, uint256 lvrReward );
+    event LVRBidPlaced(address user, uint bidAmount);
+    event LVRDebug(string);//ani-todo- only added for  debugging remove this
+     
 
     // Volatility metric
     mapping(PoolId => uint256) public sigma;
@@ -135,23 +139,29 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
         PoolId poolId = key.toId();
         
         // Only execute arbitrage if it's from the previous block
+        emit LVRDebug("1");
         if (!pendingArbitrage[poolId]) {
             uint256 previousBlock = block.number - 1;
             ArbitrageBid storage bid = currentBids[poolId][previousBlock];
+            emit LVRDebug("2");
             
             // If no external bid exists, create LVR bidder bid
             if (bid.bidder == address(0)) {
                 uint256 minBid = calculateMinimumBid(poolId, poolManager.getLiquidity(poolId));
+                emit LVRDebug("3");
                 currentBids[poolId][previousBlock] = ArbitrageBid({
                     bidder: lvrBidder,
                     bidAmount: minBid,
                     poolKey: key,
+                    //ani-todo: add defaultswapcalldata
                     inputs: abi.decode(defaultSwapCalldata, (bytes[])),
                     zeroForOne: true, // Set default direction
                     amountIn: 0 // Set default amount
                 });
+                emit LVRDebug("3");
                 bid = currentBids[poolId][previousBlock];
             }
+            
 
             // Mark as pending to prevent recursion
             pendingArbitrage[poolId] = true;
@@ -167,6 +177,7 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
                 swapToken.transferFrom(bid.bidder, address(this), bid.amountIn),
                 "Swap token transfer failed"
             );
+            emit LVRDebug("4");
             
             // Approve router to spend tokens
             swapToken.approve(address(router), bid.amountIn);
@@ -180,6 +191,7 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
                 USDC.transferFrom(bid.bidder, address(this), bid.bidAmount),
                 "Fee collection failed"
             );
+            emit LVRDebug("5");
 
             lvrRewardRate[poolId] = lvrRewardRate[poolId] + ((bid.bidAmount)*(PRECISION))/totalLiquidity[poolId];
         }
@@ -198,9 +210,10 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
         PoolId poolId = key.toId();
         address user = abi.decode(hookData, (address));
         LiquidityPosition memory liqPos = liquidityPositions[poolId][user];
+        uint reward;
         if(liqPos.amount != 0){
             uint currAmt = liqPos.amount;
-            uint reward = ((lvrRewardRate[poolId] - liqPos.lvrFundingRate)*currAmt)/(PRECISION);
+            reward = ((lvrRewardRate[poolId] - liqPos.lvrFundingRate)*currAmt)/(PRECISION);
             require(
                 USDC.transfer(user,reward),
                 "LVR reward failed"
@@ -211,6 +224,7 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
         totalLiquidity[poolId] -= uint256(int256(delta.amount0()));
         liqPos.lvrFundingRate = lvrRewardRate[poolId];
         liquidityPositions[poolId][user] = liqPos;
+        emit LVRReward(poolId,user,delta.amount0(),liqPos.amount,liqPos.lvrFundingRate, reward);
         return(this.afterRemoveLiquidity.selector, delta );
     }
 
@@ -230,19 +244,20 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
         PoolId poolId = key.toId();
         address user = abi.decode(hookData, (address));
         LiquidityPosition memory liqPos = liquidityPositions[poolId][user];
+        uint reward;
         if(liqPos.amount != 0){
             uint currAmt = liqPos.amount;
-            uint reward = ((lvrRewardRate[poolId] - liqPos.lvrFundingRate)*currAmt)/(PRECISION);
+            reward = ((lvrRewardRate[poolId] - liqPos.lvrFundingRate)*currAmt)/(PRECISION);
             require(
                 USDC.transfer(user,reward),
                 "LVR reward failed"
             );
-
         }
-        liqPos.amount += uint256(int256(delta.amount0()));
+        liqPos.amount += uint256(int256(-delta.amount0()));
         liqPos.lvrFundingRate = lvrRewardRate[poolId];
         liquidityPositions[poolId][user] = liqPos;
-        totalLiquidity[poolId] += uint256(int256(delta.amount0()));
+        totalLiquidity[poolId] += uint256(int256(-delta.amount0()));
+        emit LVRReward(poolId,user,delta.amount0(),liqPos.amount,liqPos.lvrFundingRate, reward);
         return (this.afterAddLiquidity.selector, delta);
     }
 
@@ -268,6 +283,7 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
         ArbitrageBid storage currentBid = currentBids[poolId][currentBlock];
         
         // Calculate minimum bid
+        //ani-todo: revert this below change back
         uint256 minBid = calculateMinimumBid(poolId, poolManager.getLiquidity(poolId));
         require(bidAmount >= minBid, "Bid too low");
         
@@ -299,6 +315,7 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
             zeroForOne: zeroForOne,
             amountIn: amountIn
         });
+        emit LVRBidPlaced(msg.sender, bidAmount);
     }
 
     // Admin functions to update LVR bidder settings
