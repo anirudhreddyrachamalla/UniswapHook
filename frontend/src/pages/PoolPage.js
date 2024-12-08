@@ -20,9 +20,9 @@ export default function PoolPage() {
 
       {/* Position Card */}
       <PositionCard
-        tokenPair="ETH / WBTC"
+        tokenPair="USDC / UNI"
         fee="0.3%"
-        position="0.005 ETH / 0 WBTC"
+        position="10000 USDC / 10000 UNI"
         fees="$5.23"
         apr="12.5%"
         earnings="$2.10"

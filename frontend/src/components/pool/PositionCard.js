@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Card } from '../ui/Card';
 import { BrowserProvider, Contract, formatUnits } from 'ethers';
 
-const HOOK_CONTRACT_ADDRESS = "0xYourHookContractAddressHere"; // Replace with your contract address
+const HOOK_CONTRACT_ADDRESS = "0xf32988a6b16e401d90b04ec6b61a7422ff530580"; // Replace with your contract address
 const HOOK_CONTRACT_ABI = [
   {
     "inputs": [{ "name": "poolId", "type": "bytes25" }],
