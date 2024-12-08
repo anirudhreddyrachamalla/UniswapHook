@@ -5,9 +5,10 @@ import { parseUnits, AbiCoder, BrowserProvider, Contract } from "ethers";
 
 export function TradeForm() {
 
-  const HOOK_CONTRACT_ADDRESS = "0xYourContractAddress";
-  const USDC_CONTRACT_ADDRESS = "0xUSDCContractAddress";
-  const BUY_TOKEN_ADDRESS = "0xSellToken";
+  const HOOK_CONTRACT_ADDRESS = "0xf32988a6b16e401d90b04ec6b61a7422ff530580";
+  const USDC_CONTRACT_ADDRESS = "0x497e9e733a57a09063c432bcb19cace7a047fa2e";
+  const UNI_CONTRACT_ADDRESS = "0x909d68d8a57ab8f62b6391e117a77b215ab21dfc";
+  const UNIVERSAL_ROUTER_ADDRESS = "0x4D73A4411CA1c660035e4AECC8270E5DdDEC8C17";
   const POOL_FEE = 3000;
 
   const { address, isConnected } = useAccount();
@@ -19,36 +20,33 @@ export function TradeForm() {
   const [sellToken, setSellToken] = useState('USDC');
   const [buyToken, setBuyToken] = useState('UNI');
 
-  // Hardcoded prices
   const prices = {
     ETH: 4000,
     wBTC: 100000,
     USDC: 1,
     USDT: 1,
-    UNI: 15,
+    UNI: 1,
   };
 
-  // Calculate buy amount based on sell amount and prices
   const handleSellAmountChange = (e) => {
     const value = e.target.value;
     setSellAmount(value);
-  
+
     if (!value || isNaN(value)) {
-      setBuyAmount(''); // Reset the buy amount if input is invalid
+      setBuyAmount('');
       return;
     }
-  
-    const sellAmount = parseFloat(value);
+
+    const sellAmt = parseFloat(value);
     const calculatedBuyAmount =
       (prices[sellToken] && prices[buyToken])
-        ? (sellAmount * prices[sellToken]) / prices[buyToken]
+        ? (sellAmt * prices[sellToken]) / prices[buyToken]
         : 0;
-  
-    setBuyAmount(calculatedBuyAmount.toFixed(2)); // Ensure `calculatedBuyAmount` is a number before calling toFixed
-  };  
+
+    setBuyAmount(calculatedBuyAmount ? calculatedBuyAmount.toFixed(2) : '0');
+  };
 
   const ABI = [
-    // Minimal ABI for bidLVR function
     {
       inputs: [
         {
@@ -56,6 +54,8 @@ export function TradeForm() {
             { internalType: "address", name: "currency0", type: "address" },
             { internalType: "address", name: "currency1", type: "address" },
             { internalType: "uint24", name: "fee", type: "uint24" },
+            { internalType: "int24", name: "tickSpacing", type: "int24" },
+            { internalType: "address", name: "hooks", type: "address" },
           ],
           internalType: "struct PoolKey",
           name: "key",
@@ -73,65 +73,141 @@ export function TradeForm() {
     },
   ];
 
+  const UNIVERSAL_ROUTER_ABI = [
+    {
+      "inputs": [
+        { "internalType": "bytes", "name": "commands", "type": "bytes" },
+        { "internalType": "bytes[]", "name": "inputs", "type": "bytes[]" },
+        { "internalType": "uint256", "name": "deadline", "type": "uint256" }
+      ],
+      "name": "execute",
+      "outputs": [],
+      "stateMutability": "payable",
+      "type": "function"
+    }
+  ];
+
+  // Helper: Determine zeroForOne based on token addresses
+  const zeroForOne = USDC_CONTRACT_ADDRESS.toLowerCase() < UNI_CONTRACT_ADDRESS.toLowerCase();
+
+  // Helper: Build PoolKey object
+  const buildPoolKey = () => ({
+    currency0: zeroForOne ? USDC_CONTRACT_ADDRESS : UNI_CONTRACT_ADDRESS,
+    currency1: zeroForOne ? UNI_CONTRACT_ADDRESS : USDC_CONTRACT_ADDRESS,
+    fee: POOL_FEE,
+    tickSpacing: 120,
+    hooks: HOOK_CONTRACT_ADDRESS
+  });
+
+  // Helper: Encode Swap Parameters for Arbitrage scenario
+  const buildArbitrageParams = (amountIn, minAmountOut, hookData) => {
+    const abiCoder = new AbiCoder();
+    const actions = new Uint8Array([0x00, 0x01, 0x02]); // Example actions
+    const params = [
+      abiCoder.encode(
+        [
+          "tuple(address,address,uint24,int24,address)", 
+          "bool", "uint256", "uint256", "uint160", "bytes"
+        ],
+        [
+          [USDC_CONTRACT_ADDRESS, UNI_CONTRACT_ADDRESS, POOL_FEE, 120, HOOK_CONTRACT_ADDRESS],
+          zeroForOne, // set based on token order
+          amountIn,
+          minAmountOut,
+          0,
+          hookData
+        ]
+      ),
+      abiCoder.encode(["address", "uint256"], [USDC_CONTRACT_ADDRESS, amountIn]),
+      abiCoder.encode(["address", "uint256"], [UNI_CONTRACT_ADDRESS, minAmountOut])
+    ];
+
+    const inputs = [abiCoder.encode(["bytes", "bytes[]"], [actions, params])];
+    return inputs;
+  };
+
+  // Helper: Approve tokens
+  const approveToken = async (signer, tokenAddress, spender, amount) => {
+    const tokenContract = new Contract(
+      tokenAddress,
+      ["function approve(address spender, uint256 amount) public returns (bool)"],
+      signer
+    );
+    console.log(`Approving ${tokenAddress}...`);
+    const approvalTx = await tokenContract.approve(spender, amount);
+    await approvalTx.wait();
+    console.log(`${tokenAddress} approved successfully!`);
+  };
+
   const handleSwap = async () => {
+    const provider = new BrowserProvider(window.ethereum);
+    const signer = await provider.getSigner();
+    const abiCoder = new AbiCoder();
+    const deadline = Math.floor(Date.now() / 1000) + 300; // 5 minutes from now
+    const amountIn = parseUnits(String(sellAmount), 18);
+    const minAmountOut = parseUnits("0", 18); // For example
+    const hookData = abiCoder.encode(["address"], [address]);
+
     if (isArbitrage) {
-      const key = {
-        currency0: USDC_CONTRACT_ADDRESS, // Address of the sell token
-        currency1: BUY_TOKEN_ADDRESS, // Address of the buy token
-        fee: POOL_FEE, // Pool fee
-      };
-      const bidAmount = parseUnits(String(bid), 6); // Assuming USDC with 6 decimals
-      const amountIn = parseUnits(String(sellAmount), 6); // Sell token same as bid token
-      const minAmountOut = parseUnits(String(buyAmount), 18); // Minimum buy token amount
-      const totalAmount = bidAmount.add(amountIn);
-  
-      // Encode actions and parameters
-      const abiCoder = new AbiCoder();
-      const actions = abiCoder.encode(
-        ["uint8[]"],
-        [[0 /* SWAP_EXACT_IN_SINGLE */, 1 /* SETTLE_ALL */, 2 /* TAKE_ALL */]]
-      );
-      const params = [
-        abiCoder.encode(
-          [
-            "tuple(address currency0, address currency1, uint24 fee)",
-            "bool",
-            "uint256",
-            "uint256",
-            "uint160",
-            "bytes",
-          ],
-          [key, true, amountIn, minAmountOut, 0, "0x"]
-        ),
-        abiCoder.encode(["address", "uint256"], [USDC_CONTRACT_ADDRESS, amountIn]),
-        abiCoder.encode(["address", "uint256"], [BUY_TOKEN_ADDRESS, minAmountOut]),
-      ];
-      const inputs = [abiCoder.encode(["bytes", "bytes[]"], [actions, params])];
-  
+      const key = buildPoolKey();
+      const bidAmount = parseUnits(String(bid), 18);     // Adjust decimals as needed
+      const inputs = buildArbitrageParams(amountIn, minAmountOut, hookData);
+      const totalAmount = bidAmount+ amountIn;
+
       try {
-        const provider = new BrowserProvider(window.ethereum);
-        const signer = await provider.getSigner();
+        // Approve token spending
+        await approveToken(signer, USDC_CONTRACT_ADDRESS, HOOK_CONTRACT_ADDRESS, totalAmount);
 
-        const usdcContract = new Contract(
-          USDC_CONTRACT_ADDRESS,
-          ["function approve(address spender, uint256 amount) public returns (bool)"],
-          signer
-        );
-        const approvalTx = await usdcContract.approve(HOOK_CONTRACT_ADDRESS, totalAmount);
-        await approvalTx.wait();
-        console.log("USDC approved successfully!");
-
-        const contract = new Contract(HOOK_CONTRACT_ADDRESS, ABI, signer);
-        const tx = await contract.bidLVR(key, bidAmount, inputs, true, amountIn);
+        // Call bidLVR
+        const hookContract = new Contract(HOOK_CONTRACT_ADDRESS, ABI, signer);
+        console.log("Submitting bid...");
+        const tx = await hookContract.bidLVR(key, bidAmount, inputs, zeroForOne, amountIn);
         const receipt = await tx.wait();
-        console.log("Transaction confirmed:", receipt);
+        console.log("Bid submitted successfully:", receipt);
       } catch (error) {
         console.error("Error in handleSwap:", error);
       }
+
     } else {
-      console.log("Normal Swap Logic");
+      // Normal Swap Logic (using universal router's execute)
+      // Build commands and inputs for a normal swap if needed
+      const commands = new Uint8Array([0x10]); // Example command for a normal swap
+      const actions = new Uint8Array([0x00, 0x01, 0x02]); // actions for simple swap
+      const params = [
+        abiCoder.encode(
+          [
+            "tuple(address,address,uint24,int24,address)", 
+            "bool", "uint256", "uint256", "uint160", "bytes"
+          ],
+          [
+            [USDC_CONTRACT_ADDRESS, UNI_CONTRACT_ADDRESS, POOL_FEE, 120, HOOK_CONTRACT_ADDRESS],
+            zeroForOne, // set based on token order
+            amountIn,
+            minAmountOut,
+            0,
+            hookData
+          ]
+        ),
+        abiCoder.encode(["address", "uint256"], [USDC_CONTRACT_ADDRESS, amountIn]),
+        abiCoder.encode(["address", "uint256"], [UNI_CONTRACT_ADDRESS, minAmountOut])
+      ];
+
+      const inputs = [abiCoder.encode(["bytes", "bytes[]"], [actions, params])];
+      const universalRouter = new Contract(UNIVERSAL_ROUTER_ADDRESS, UNIVERSAL_ROUTER_ABI, signer);
+
+      try {
+        // Approvals if necessary
+        // Approve token spending
+        await approveToken(signer, USDC_CONTRACT_ADDRESS, HOOK_CONTRACT_ADDRESS, amountIn);
+        // Execute swap
+        const tx = await universalRouter.execute(commands, inputs, deadline, { value: 0 });
+        const receipt = await tx.wait();
+        console.log("Simple swap executed successfully:", receipt);
+      } catch (error) {
+        console.error("Error executing simple swap:", error);
+      }
     }
-  };  
+  };
 
   return (
     <div className="space-y-3 p-6 bg-gray-900 rounded-xl shadow-md text-white">

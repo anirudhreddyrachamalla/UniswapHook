@@ -59,8 +59,8 @@ contract DeployHookAndPool is Script {
         tokenA.approve(address(swapRouter), type(uint256).max);
         tokenB.approve(address(swapRouter), type(uint256).max);
 
-        tokenA.mint(msg.sender, 100 * 10 ** 18);
-        tokenB.mint(msg.sender, 100 * 10 ** 18);
+        tokenA.mint(msg.sender, 100000 * 10 ** 18);
+        tokenB.mint(msg.sender, 100000 * 10 ** 18);
 
         // Mine for hook address
         vm.stopBroadcast();
@@ -102,7 +102,7 @@ contract DeployHookAndPool is Script {
             IPoolManager.ModifyLiquidityParams({
                 tickLower: -120,
                 tickUpper: 120,
-                liquidityDelta: 10e18,
+                liquidityDelta: 1671754e18, // 10k tokens each
                 salt: 0
             }),
             hookData
