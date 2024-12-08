@@ -27,7 +27,6 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
     event SigmaUpdated(PoolId indexed poolId, uint256 sigma);
     event LVRReward(PoolId poolId, address user, int liquidityDelta, uint updatedLiquidity, uint256 lvrRewardRate, uint256 lvrReward );
     event LVRBidPlaced(address user, uint bidAmount);
-    event LVRDebug(string);//ani-todo- only added for  debugging remove this
      
 
     // Volatility metric
@@ -151,7 +150,6 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
                     bidder: lvrBidder,
                     bidAmount: minBid,
                     poolKey: key,
-                    //ani-todo: add defaultswapcalldata
                     inputs: IPoolManager.SwapParams({
                 zeroForOne: true,
                 // We provide a negative value here to signify an "exact input for output" swap
@@ -177,6 +175,12 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
                 Currency.unwrap(bid.poolKey.currency0) : 
                 Currency.unwrap(bid.poolKey.currency1)
             );
+
+            IERC20 receiveToken = IERC20(
+                !bid.zeroForOne ? 
+                Currency.unwrap(bid.poolKey.currency0) : 
+                Currency.unwrap(bid.poolKey.currency1)
+            );
             
             require(
                 swapToken.transferFrom(bid.bidder, address(this), bid.amountIn),
@@ -188,8 +192,13 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
             
             // Execute the swap
             bytes memory commands = abi.encodePacked(uint8(0x10)); // V4_SWAP command
-            swapAndSettleBalances(key, params);
-            //ani-todo: transfer swapped funds to bidder
+            BalanceDelta balanceDelta = swapAndSettleBalances(key, params);
+            uint256 outputAmount = bid.zeroForOne
+            ? uint256(int256(balanceDelta.amount1()))
+            : uint256(int256(balanceDelta.amount0()));
+
+            receiveToken.transfer(bid.bidder, outputAmount);
+
             
             // Collect USDC fee
             require(
