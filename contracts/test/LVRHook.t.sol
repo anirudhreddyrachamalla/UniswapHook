@@ -20,6 +20,8 @@ import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 import {SqrtPriceMath} from "v4-core/src/libraries/SqrtPriceMath.sol";
 import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
 import {EasyPosm} from "./utils/EasyPosm.sol";
+import {PoolKey} from "v4-core/src/types/PoolKey.sol";
+import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 // import { Permit2 } from "@uniswap/universal-router/lib/permit2/src/Permit2.sol";
 
 
