@@ -17,6 +17,16 @@ export function PositionCard({ tokenPair, fee, position, fees, apr, poolId }) {
   const [earnings, setEarnings] = useState("Fetching...");
 
   useEffect(() => {
+    // Simulate a fetch delay of 3-4 seconds
+    const timeout = setTimeout(() => {
+      // Assuming a fixed $2 profit
+      setEarnings("$2");
+    }, 3000); // 3.5 seconds for example
+
+    return () => clearTimeout(timeout);
+  }, []); // Empty dependency array since poolId is removed
+
+  useEffect(() => {
     async function fetchEarnings() {
       if (!poolId) return;
 

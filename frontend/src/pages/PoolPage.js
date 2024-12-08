@@ -23,7 +23,7 @@ export default function PoolPage() {
         tokenPair="USDC / UNI"
         fee="0.3%"
         position="10000 USDC / 10000 UNI"
-        fees="$5.23"
+        fees="$0"
         apr="12.5%"
         earnings="$2.10"
       />
