@@ -295,7 +295,6 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
         uint256 bidAmount,
         IPoolManager.SwapParams calldata inputs,
         bool zeroForOne,
-        //ani-todo can remove amountIn
         uint256 amountIn
     ) external {
         require(bidAmount > 0, "Bid amount must be greater than 0");
@@ -305,7 +304,6 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
         ArbitrageBid storage currentBid = currentBids[poolId][currentBlock];
         
         // Calculate minimum bid
-        //ani-todo: revert this below change back
         uint256 minBid = calculateMinimumBid(poolId, poolManager.getLiquidity(poolId));
         require(bidAmount >= minBid, "Bid too low");
         
