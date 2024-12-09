@@ -25,8 +25,8 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
     uint public constant PRECISION = 100_000_000;
     bytes32 public vkHash;
     event SigmaUpdated(PoolId indexed poolId, uint256 sigma);
-    event LVRReward(PoolId poolId, address user, int liquidityDelta, uint updatedLiquidity, uint256 lvrRewardRate, uint256 lvrReward );
-    event LVRBidPlaced(address user, uint bidAmount);
+    event LVRReward(PoolId indexed poolId, address indexed user, uint256 indexed lvrReward, int liquidityDelta, uint updatedLiquidity, uint256 lvrRewardRate );
+    event LVRBidPlaced(address indexed user,PoolId indexed poolId, uint bidAmount);
      
 
     // Volatility metric
@@ -160,7 +160,7 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
                     : TickMath.MAX_SQRT_PRICE - 1
             }),
                     zeroForOne: true, // Set default direction
-                    amountIn: 0 // Set default amount
+                    amountIn: defaultSwapAmount // Set default amount
                 });
                 bid = currentBids[poolId][previousBlock];
             }
@@ -191,8 +191,7 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
             swapToken.approve(address(router), bid.amountIn);
             
             // Execute the swap
-            bytes memory commands = abi.encodePacked(uint8(0x10)); // V4_SWAP command
-            BalanceDelta balanceDelta = swapAndSettleBalances(key, params);
+            BalanceDelta balanceDelta = swapAndSettleBalances(key, bid.inputs);
             uint256 outputAmount = bid.zeroForOne
             ? uint256(int256(balanceDelta.amount1()))
             : uint256(int256(balanceDelta.amount0()));
@@ -232,14 +231,13 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
                 USDC.transfer(user,reward),
                 "LVR reward failed"
             );
-
         }
         uint maxDeductableDelta = min(liqPos.amount, uint256(int256(delta.amount0())));
         liqPos.amount -= maxDeductableDelta;
         totalLiquidity[poolId] -= maxDeductableDelta;
         liqPos.lvrFundingRate = lvrRewardRate[poolId];
         liquidityPositions[poolId][user] = liqPos;
-        emit LVRReward(poolId,user,-1*int(maxDeductableDelta),liqPos.amount,liqPos.lvrFundingRate, reward);
+        emit LVRReward(poolId,user,reward,-1*int(maxDeductableDelta),liqPos.amount,liqPos.lvrFundingRate);
         return(this.afterRemoveLiquidity.selector, delta );
     }
 
@@ -279,7 +277,7 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
         liqPos.lvrFundingRate = lvrRewardRate[poolId];
         liquidityPositions[poolId][user] = liqPos;
         totalLiquidity[poolId] += uint256(int256(-delta.amount0()));
-        emit LVRReward(poolId,user,delta.amount0(),liqPos.amount,liqPos.lvrFundingRate, reward);
+        emit LVRReward(poolId,user,reward, delta.amount0(),liqPos.amount,liqPos.lvrFundingRate);
         return (this.afterAddLiquidity.selector, delta);
     }
 
@@ -335,7 +333,7 @@ contract LVRHook is BaseHook, Ownable, BrevisAppZkOnly {
             zeroForOne: zeroForOne,
             amountIn: amountIn
         });
-        emit LVRBidPlaced(msg.sender, bidAmount);
+        emit LVRBidPlaced(msg.sender, poolId, bidAmount);
     }
 
     // Admin functions to update LVR bidder settings
